@@ -374,7 +374,7 @@ export class AlertAidAPIService {
     };
   }
 
-  // Get active alerts - matches /api/alerts
+  // Get active alerts - matches /api/alerts/active
   static async getActiveAlerts(
     lat?: number,
     lon?: number
@@ -384,7 +384,7 @@ export class AlertAidAPIService {
     if (lon !== undefined) params.append('lon', lon.toString());
     
     const query = params.toString() ? `?${params}` : '';
-    return apiRequest<AlertsResponse>(`${API_PREFIX}/alerts${query}`);
+    return apiRequest<AlertsResponse>(`${API_PREFIX}/alerts/active${query}`);
   }
 
   // Get earthquake data - matches /api/external/earthquakes/recent

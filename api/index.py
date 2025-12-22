@@ -45,6 +45,7 @@ def root():
             "/api/health",
             "/api/weather/{lat}/{lon}",
             "/api/predict/disaster-risk",
+            "/api/alerts",
             "/api/alerts/active",
             "/api/earthquakes"
         ],
