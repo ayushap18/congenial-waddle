@@ -229,9 +229,8 @@ async def predict_disaster_risk(request: Request, lat: float = 28.6139, lon: flo
     }
 
 
-@app.get("/api/alerts/active")
-def get_active_alerts(lat: float = 28.6139, lon: float = 77.2090):
-    """Get active alerts for coordinates"""
+def fetch_alerts_data(lat: float, lon: float):
+    """Common function to fetch alerts data"""
     alerts = []
     
     # Fetch earthquakes from USGS
@@ -261,7 +260,7 @@ def get_active_alerts(lat: float = 28.6139, lon: float = 77.2090):
                 "id": f"eq-{feature.get('id')}",
                 "title": f"Earthquake Alert - M{mag}",
                 "description": f"Earthquake detected: {props.get('place')}",
-                "severity": "Severe" if mag >= 5.0 else "Moderate",
+                "severity": "High" if mag >= 5.0 else "Medium",
                 "urgency": "Immediate" if mag >= 5.0 else "Expected",
                 "event": "Earthquake",
                 "areas": [props.get('place')] if props.get('place') else [],
@@ -279,6 +278,19 @@ def get_active_alerts(lat: float = 28.6139, lon: float = 77.2090):
         "location": {"latitude": lat, "longitude": lon},
         "timestamp": datetime.now().isoformat()
     }
+
+
+# Support both /api/alerts and /api/alerts/active
+@app.get("/api/alerts")
+def get_alerts(lat: float = 28.6139, lon: float = 77.2090):
+    """Get active alerts for coordinates (alias)"""
+    return fetch_alerts_data(lat, lon)
+
+
+@app.get("/api/alerts/active")
+def get_active_alerts(lat: float = 28.6139, lon: float = 77.2090):
+    """Get active alerts for coordinates"""
+    return fetch_alerts_data(lat, lon)
 
 
 @app.get("/api/earthquakes")

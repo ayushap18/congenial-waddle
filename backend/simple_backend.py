@@ -249,69 +249,76 @@ async def predict_disaster_risk(
         sentry_sdk.capture_exception(e)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/alerts/active")
-async def get_active_alerts(
+
+async def fetch_alerts_common(lat: float, lon: float):
+    """Common function to fetch alerts data"""
+    # Check for earthquake activity from USGS
+    earthquakes = []
+    try:
+        end_time = datetime.utcnow()
+        start_time = end_time - timedelta(days=1)
+        
+        params = {
+            "format": "geojson",
+            "starttime": start_time.strftime("%Y-%m-%d"),
+            "endtime": end_time.strftime("%Y-%m-%d"),
+            "minmagnitude": 2.5,
+            "latitude": lat,
+            "longitude": lon,
+            "maxradiuskm": 500
+        }
+        
+        response = requests.get(USGS_EARTHQUAKE_URL, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            for feature in data.get("features", [])[:5]:
+                props = feature.get("properties", {})
+                earthquakes.append({
+                    "id": feature.get("id"),
+                    "magnitude": props.get("mag"),
+                    "place": props.get("place"),
+                    "time": props.get("time"),
+                    "type": "earthquake"
+                })
+    except Exception as e:
+        logger.warning(f"USGS API error: {e}")
+    
+    # Generate alerts based on conditions
+    alerts = []
+    
+    if earthquakes:
+        for eq in earthquakes:
+            alerts.append({
+                "id": f"eq-{eq['id']}",
+                "title": f"Earthquake Alert - M{eq['magnitude']}",
+                "description": f"Earthquake detected: {eq['place']}",
+                "severity": "High" if eq['magnitude'] >= 5.0 else "Medium",
+                "urgency": "Immediate" if eq['magnitude'] >= 5.0 else "Expected",
+                "event": "Earthquake",
+                "areas": [eq['place']],
+                "onset": datetime.now().isoformat(),
+                "expires": (datetime.now() + timedelta(hours=6)).isoformat()
+            })
+    
+    return {
+        "alerts": alerts,
+        "count": len(alerts),
+        "source": "Alert_Aid_System",
+        "is_real": len(earthquakes) > 0,
+        "location": {"latitude": lat, "longitude": lon},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+# Support both /api/alerts and /api/alerts/active
+@app.get("/api/alerts")
+async def get_alerts(
     lat: float = Query(default=28.6139, description="Latitude"),
     lon: float = Query(default=77.2090, description="Longitude")
 ):
-    """Get active alerts for a location"""
+    """Get active alerts for a location (alias)"""
     try:
-        # Check for earthquake activity from USGS
-        earthquakes = []
-        try:
-            end_time = datetime.utcnow()
-            start_time = end_time - timedelta(days=1)
-            
-            params = {
-                "format": "geojson",
-                "starttime": start_time.strftime("%Y-%m-%d"),
-                "endtime": end_time.strftime("%Y-%m-%d"),
-                "minmagnitude": 2.5,
-                "latitude": lat,
-                "longitude": lon,
-                "maxradiuskm": 500
-            }
-            
-            response = requests.get(USGS_EARTHQUAKE_URL, params=params, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                for feature in data.get("features", [])[:5]:
-                    props = feature.get("properties", {})
-                    earthquakes.append({
-                        "id": feature.get("id"),
-                        "magnitude": props.get("mag"),
-                        "place": props.get("place"),
-                        "time": props.get("time"),
-                        "type": "earthquake"
-                    })
-        except Exception as e:
-            logger.warning(f"USGS API error: {e}")
-        
-        # Generate alerts based on conditions
-        alerts = []
-        
-        if earthquakes:
-            for eq in earthquakes:
-                alerts.append({
-                    "id": f"eq-{eq['id']}",
-                    "title": f"Earthquake Alert - M{eq['magnitude']}",
-                    "description": f"Earthquake detected: {eq['place']}",
-                    "severity": "Severe" if eq['magnitude'] >= 5.0 else "Moderate",
-                    "urgency": "Immediate" if eq['magnitude'] >= 5.0 else "Expected",
-                    "event": "Earthquake",
-                    "areas": [eq['place']],
-                    "onset": datetime.now().isoformat(),
-                    "expires": (datetime.now() + timedelta(hours=6)).isoformat()
-                })
-        
-        return {
-            "alerts": alerts,
-            "count": len(alerts),
-            "source": "Alert_Aid_System",
-            "is_real": len(earthquakes) > 0,
-            "location": {"latitude": lat, "longitude": lon},
-            "timestamp": datetime.now().isoformat()
-        }
+        return await fetch_alerts_common(lat, lon)
     except Exception as e:
         logger.error(f"Alerts error: {e}")
         return {
@@ -321,6 +328,26 @@ async def get_active_alerts(
             "is_real": False,
             "error": str(e)
         }
+
+
+@app.get("/api/alerts/active")
+async def get_active_alerts(
+    lat: float = Query(default=28.6139, description="Latitude"),
+    lon: float = Query(default=77.2090, description="Longitude")
+):
+    """Get active alerts for a location"""
+    try:
+        return await fetch_alerts_common(lat, lon)
+    except Exception as e:
+        logger.error(f"Alerts error: {e}")
+        return {
+            "alerts": [],
+            "count": 0,
+            "source": "Alert_Aid_System",
+            "is_real": False,
+            "error": str(e)
+        }
+
 
 @app.get("/api/external-data")
 async def get_external_data(
