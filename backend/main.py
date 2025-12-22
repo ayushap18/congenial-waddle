@@ -10,38 +10,46 @@ import uvicorn
 import logging
 import os
 import requests
-import numpy as np
-import pandas as pd
 from datetime import datetime, timedelta
 import json
 from typing import Dict, List, Any, Optional
 import asyncio
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
-import joblib
-import sentry_sdk
-from sentry_sdk.integrations.logging import LoggingIntegration
-# from sentry_sdk.integrations.requests import RequestsIntegration
 
-# Initialize Sentry
-SENTRY_DSN = os.getenv("SENTRY_DSN", "https://74e92ef112fbc3aed76dd4f0169c70f8@o4510520744673280.ingest.us.sentry.io/4510549672853504")
+# Try to import ML packages, but don't fail if they're not available
+try:
+    import numpy as np
+    import pandas as pd
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.preprocessing import StandardScaler
+    import joblib
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+    print("⚠️ ML packages not available, using rule-based predictions")
 
-sentry_logging = LoggingIntegration(
-    level=logging.INFO,        # Capture info and above as breadcrumbs
-    event_level=logging.INFO   # Send INFO and above as events (Logs)
-)
+try:
+    import sentry_sdk
+    from sentry_sdk.integrations.logging import LoggingIntegration
+    SENTRY_AVAILABLE = True
+except ImportError:
+    SENTRY_AVAILABLE = False
 
-sentry_sdk.init(
-    dsn=SENTRY_DSN,
-    release="alert-aid-backend@1.0.0",
-    environment=os.getenv("ENVIRONMENT", "development"),
-    integrations=[
-        sentry_logging,
-    ],
-    traces_sample_rate=1.0,
-    profiles_sample_rate=1.0,
-    enable_tracing=True,
-)
+# Initialize Sentry if available
+if SENTRY_AVAILABLE:
+    SENTRY_DSN = os.getenv("SENTRY_DSN", "https://74e92ef112fbc3aed76dd4f0169c70f8@o4510520744673280.ingest.us.sentry.io/4510549672853504")
+    
+    sentry_logging = LoggingIntegration(
+        level=logging.INFO,
+        event_level=logging.INFO
+    )
+    
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        release="alert-aid-backend@1.0.0",
+        environment=os.getenv("ENVIRONMENT", "production"),
+        integrations=[sentry_logging],
+        traces_sample_rate=1.0,
+    )
 
 # Import route modules
 from routes import health, weather, predict, alerts, external_apis
@@ -124,6 +132,10 @@ def initialize_ml_model():
     """Initialize ML model for disaster prediction"""
     global ml_model, scaler
     
+    if not ML_AVAILABLE:
+        logger.info("⚠️ ML packages not available, using rule-based predictions")
+        return
+    
     try:
         # Create a simple trained model for demonstration
         # In production, load pre-trained model with joblib.load()
@@ -157,8 +169,9 @@ def initialize_ml_model():
         ml_model = None
         scaler = None
 
-# Initialize ML model on startup
-initialize_ml_model()
+# Initialize ML model on startup (if available)
+if ML_AVAILABLE:
+    initialize_ml_model()
 
 # CORS middleware already configured above at line 48-72 - don't add duplicate!
 # The app variable is already created at line 31 with CORS enabled
