@@ -62,27 +62,72 @@ async def predict_disaster(data: PredictionInput):
 async def get_disaster_risk(lat: float = 28.6139, lon: float = 77.2090):
     """
     Get disaster risk assessment for coordinates (GET method for easy testing)
-    Uses default weather conditions or fetches real data
+    Fetches real weather data from OpenWeatherMap for accurate predictions
     """
+    import aiohttp
+    import os
+    
     try:
-        # Default weather parameters (can be enhanced to fetch real data)
-        temperature = 28.0
-        humidity = 65.0
-        wind_speed = 12.0
-        pressure = 1012.0
+        # Try to fetch real weather data
+        api_key = os.getenv("OPENWEATHER_API_KEY", "1801423b3942e324ab80f5b47afe0859")
+        weather_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units=metric"
         
-        # Get predictions using the same algorithm
+        temperature = 25.0
+        humidity = 60.0
+        wind_speed = 10.0
+        pressure = 1013.0
+        visibility = 10.0
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(weather_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                    if response.status == 200:
+                        weather_data = await response.json()
+                        temperature = weather_data.get("main", {}).get("temp", 25.0)
+                        humidity = weather_data.get("main", {}).get("humidity", 60.0)
+                        wind_speed = weather_data.get("wind", {}).get("speed", 10.0) * 3.6  # m/s to km/h
+                        pressure = weather_data.get("main", {}).get("pressure", 1013.0)
+                        visibility = weather_data.get("visibility", 10000) / 1000  # m to km
+                        print(f"✅ Using real weather data: {temperature}°C, {humidity}% humidity")
+        except Exception as e:
+            print(f"⚠️ Could not fetch weather data: {e}, using defaults")
+        
+        # Get predictions using the algorithm with real weather data
         predictions = _enhanced_disaster_prediction(
             temperature, humidity, wind_speed, pressure, lat, lon
         )
         
-        # Calculate overall risk score
+        # Calculate overall risk score (ensure minimum of 1.5)
+        base_risk = 1.5  # Minimum baseline risk
+        
         if predictions:
             max_prob = max(p["probability"] for p in predictions)
             avg_prob = sum(p["probability"] for p in predictions) / len(predictions)
-            risk_score = round((max_prob * 0.6 + avg_prob * 0.4) * 10, 1)
+            calculated_risk = (max_prob * 0.6 + avg_prob * 0.4) * 10
+            risk_score = round(max(calculated_risk, base_risk), 1)
         else:
-            risk_score = 2.0  # Low risk when no significant predictions
+            # Even with no predictions, calculate risk based on conditions
+            risk_score = base_risk
+            
+            # Add risk for low visibility (fog)
+            if visibility < 2:
+                risk_score += 1.5
+            elif visibility < 5:
+                risk_score += 0.5
+            
+            # Add risk for high humidity
+            if humidity > 90:
+                risk_score += 1.0
+            elif humidity > 80:
+                risk_score += 0.5
+            
+            # Add risk for extreme temperatures
+            if temperature > 40 or temperature < 0:
+                risk_score += 1.5
+            elif temperature > 35 or temperature < 5:
+                risk_score += 0.5
+            
+            risk_score = round(min(risk_score, 10.0), 1)
         
         # Determine overall risk level
         if risk_score >= 7:
@@ -94,16 +139,28 @@ async def get_disaster_risk(lat: float = 28.6139, lon: float = 77.2090):
         else:
             overall_risk = "low"
         
+        # Calculate individual risk scores
+        flood_risk = round(next((p["probability"] * 10 for p in predictions if p["type"] == "flood"), max(1.5, humidity / 40)), 1)
+        fire_risk = round(next((p["probability"] * 10 for p in predictions if p["type"] == "wildfire"), max(1.0, (100 - humidity) / 40)), 1)
+        storm_risk = round(next((p["probability"] * 10 for p in predictions if p["type"] == "severe_weather"), max(1.5, wind_speed / 10)), 1)
+        
         return {
             "success": True,
             "overall_risk": overall_risk,
             "risk_score": risk_score,
-            "flood_risk": round(next((p["probability"] * 10 for p in predictions if p["type"] == "flood"), 2.0), 1),
-            "fire_risk": round(next((p["probability"] * 10 for p in predictions if p["type"] == "wildfire"), 2.0), 1),
-            "storm_risk": round(next((p["probability"] * 10 for p in predictions if p["type"] == "severe_weather"), 2.0), 1),
+            "flood_risk": min(flood_risk, 10.0),
+            "fire_risk": min(fire_risk, 10.0),
+            "storm_risk": min(storm_risk, 10.0),
             "earthquake_risk": round(random.uniform(1.0, 3.0), 1),
             "predictions": predictions,
             "confidence": 0.85,
+            "weather_conditions": {
+                "temperature": temperature,
+                "humidity": humidity,
+                "wind_speed": round(wind_speed, 1),
+                "pressure": pressure,
+                "visibility": visibility
+            },
             "location_analyzed": {"latitude": lat, "longitude": lon},
             "model_version": "RuleBased-v2.1",
             "timestamp": datetime.now().isoformat()
